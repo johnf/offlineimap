@@ -227,15 +227,32 @@ class IMAPFolder(BaseFolder):
     def getmessageflags(self, uid):
         return self.messagelist[uid]['flags']
 
-    def savemessage_getnewheader(self, content):
+    def generate_randomheader(self, content):
+        """Returns a unique X-OfflineIMAP header
+
+         Generate an 'X-OfflineIMAP' mail header which contains a random
+         unique value (which is based on the mail content, and a random
+         number). This header allows us to fetch a mail after APPENDing
+         it to an IMAP server and thus find out the UID that the server
+         assigned it.
+
+        :returns: (headername, headervalue) tuple, consisting of strings
+                  headername == 'X-OfflineIMAP' and headervalue will be a
+                  random string
+        """
         headername = 'X-OfflineIMAP'
-        headervalue = '%s-' % str(binascii.crc32(content)).replace('-', 'x')
-        headervalue += binascii.hexlify(self.repository.getname()) + '-'
-        headervalue += binascii.hexlify(self.getname())
-        headervalue += '-%d-' % long(time.time())
-        headervalue += str(self.randomgenerator.random()).replace('.', '')
-        headervalue += '-v' + offlineimap.__version__
+        # We need a random component too. If we ever upload the same
+        # mail twice (e.g. in different folders), we would still need to
+        # get the UID for the correct one. As we won't have too many
+        # mails with identical content in one folder, the randomness
+        # requirements are not extremly critial though.
+
+        # compute unsigned crc32 of 'content' as unique hash
+        # NB: crc32 returns unsigned only starting with python 3.0
+        headervalue  = str( binascii.crc32(content) & 0xffffffff ) + '-'
+        headervalue += str(self.randomgenerator.randint(0,9999999999))
         return (headername, headervalue)
+
 
     def savemessage_addheader(self, content, headername, headervalue):
         self.ui.debug('imap',
@@ -256,10 +273,8 @@ class IMAPFolder(BaseFolder):
         self.ui.debug('imap', 'savemessage_addheader: trailer = ' + repr(trailer))
         return leader + newline + trailer
 
-    def savemessage_searchforheader(self, imapobj, headername, headervalue):
-        if imapobj.untagged_responses.has_key('APPENDUID'):
-            return long(imapobj.untagged_responses['APPENDUID'][-1].split(' ')[1])
 
+    def savemessage_searchforheader(self, imapobj, headername, headervalue):
         self.ui.debug('imap', 'savemessage_searchforheader called for %s: %s' % \
                  (headername, headervalue))
         # Now find the UID it got.
@@ -284,89 +299,164 @@ class IMAPFolder(BaseFolder):
         matchinguids.sort()
         return long(matchinguids[0])
 
-    def savemessage(self, uid, content, flags, rtime):
-        imapobj = self.imapserver.acquireconnection()
-        self.ui.debug('imap', 'savemessage: called')
-        try:
-            try:
-                imapobj.select(self.getfullname()) # Needed for search
-            except imapobj.readonly:
-                self.ui.msgtoreadonly(self, uid, content, flags)
-                # Return indicating message taken, but no UID assigned.
-                # Fudge it.
-                return 0
-            
-            # This backend always assigns a new uid, so the uid arg is ignored.
-            # In order to get the new uid, we need to save off the message ID.
 
+    def getmessageinternaldate(self, content, rtime=None):
+        """Parses mail and returns an INTERNALDATE string
+
+        It will use information in the following order, falling back as an attempt fails:
+          - rtime parameter
+          - Date header of email
+
+        We return None, if we couldn't find a valid date. In this case
+        the IMAP server will use the server local time when appening
+        (per RFC).
+
+        Note, that imaplib's Time2Internaldate is inherently broken as
+        it returns localized date strings which are invalid for IMAP
+        servers. However, that function is called for *every* append()
+        internally. So we need to either pass in `None` or the correct
+        string (in which case Time2Internaldate() will do nothing) to
+        append(). The output of this function is designed to work as
+        input to the imapobj.append() function.
+
+        :param rtime: epoch timestamp to be used rather than analyzing
+                  the email.
+        :returns: string in the form of "DD-Mmm-YYYY HH:MM:SS +HHMM"
+                  (including double quotes) or `None` in case of failure
+                  (which is fine as value for append)."""
+        if rtime is None:
             message = rfc822.Message(StringIO(content))
-            datetuple_msg = rfc822.parsedate(message.getheader('Date'))
-            # Will be None if missing or not in a valid format.
+            # parsedate returns a 9-tuple that can be passed directly to
+            # time.mktime(); Will be None if missing or not in a valid
+            # format.  Note that indexes 6, 7, and 8 of the result tuple are
+            # not usable.
+            datetuple = rfc822.parsedate(message.getheader('Date'))
 
-            # If time isn't known
-            if rtime == None and datetuple_msg == None:
-                datetuple = time.localtime()
-            elif rtime == None:
-                datetuple = datetuple_msg
-            else:
-                datetuple = time.localtime(rtime)
+            if datetuple is None:
+                #could not determine the date, use the local time.
+                return None
+        else:
+            #rtime is set, use that instead
+            datetuple = time.localtime(rtime)
+
+        try:
+            # Check for invalid dates
+            if datetuple[0] < 1981:
+                raise ValueError
+
+            # Check for invalid dates
+            datetuple_check = time.localtime(time.mktime(datetuple))
+            if datetuple[:2] != datetuple_check[:2]:
+                raise ValueError
+
+        except (ValueError, OverflowError):
+            # Argh, sometimes it's a valid format but year is 0102
+            # or something.  Argh.  It seems that Time2Internaldate
+            # will rause a ValueError if the year is 0102 but not 1902,
+            # but some IMAP servers nonetheless choke on 1902.
+            self.ui.debug("Message with invalid date %s. Server will use local time." % datetuple)
+            return None
+
+        #produce a string representation of datetuple that works as
+        #INTERNALDATE
+        num2mon = {1:'Jan', 2:'Feb', 3:'Mar', 4:'Apr', 5:'May', 6:'Jun',
+                   7:'Jul', 8:'Aug', 9:'Sep', 10:'Oct', 11:'Nov', 12:'Dec'}
+
+        if datetuple.tm_isdst == '1':
+            zone = -time.altzone
+        else:
+            zone = -time.timezone
+        offset_h, offset_m = divmod(zone//60, 60)
+
+        internaldate = '"%02d-%s-%04d %02d:%02d:%02d %+03d%02d"' \
+            % (datetuple.tm_mday, num2mon[datetuple.tm_mon], datetuple.tm_year, \
+               datetuple.tm_hour, datetuple.tm_min, datetuple.tm_sec, offset_h, offset_m)
+
+        return internaldate
+
+    def savemessage(self, uid, content, flags, rtime):
+        """Save the message on the Server
+
+        This backend always assigns a new uid, so the uid arg is ignored.
+
+        This function will update the self.messagelist dict to contain
+        the new message after sucessfully saving it.
+
+        :param rtime: A timestamp to be used as the mail date
+        :returns: the UID of the new message as assigned by the
+                  server. If the folder is read-only it will return 0."""
+        self.ui.debug('imap', 'savemessage: called')
+
+        try:
+            imapobj = self.imapserver.acquireconnection()
 
             try:
-                if datetuple[0] < 1981:
-                    raise ValueError
+                imapobj.select(self.getfullname()) # Needed for search and making the box READ-WRITE
+            except imapobj.readonly:
+                # readonly exception. Return original uid to notify that
+                # we did not save the message. (see savemessage in Base.py)
+                self.ui.msgtoreadonly(self, uid, content, flags)
+                return uid
 
-                # Check for invalid date
-                datetuple_check = time.localtime(time.mktime(datetuple))
-                if datetuple[:2] != datetuple_check[:2]:
-                    raise ValueError
+            # UIDPLUS extension provides us with an APPENDUID response to our append()
+            use_uidplus = 'UIDPLUS' in imapobj.capabilities
 
-                # This could raise a value error if it's not a valid format.
-                date = imaplib.Time2Internaldate(datetuple) 
-            except (ValueError, OverflowError):
-                # Argh, sometimes it's a valid format but year is 0102
-                # or something.  Argh.  It seems that Time2Internaldate
-                # will rause a ValueError if the year is 0102 but not 1902,
-                # but some IMAP servers nonetheless choke on 1902.
-                date = imaplib.Time2Internaldate(time.localtime())
-
-            self.ui.debug('imap', 'savemessage: using date ' + str(date))
+            # get the date of the message file, so we can pass it to the server.
+            date = self.getmessageinternaldate(content, rtime)
+            self.ui.debug('imap', 'savemessage: using date %s' % date)
+    
             content = re.sub("(?<!\r)\n", "\r\n", content)
-            self.ui.debug('imap', 'savemessage: initial content is: ' + repr(content))
+    
+            if not use_uidplus:
+                # insert a random unique header that we can fetch later
+                (headername, headervalue) = self.generate_randomheader(content)
+                self.ui.debug('imap', 'savemessage: new headers are: %s: %s' % \
+                             (headername, headervalue))
+                content = self.savemessage_addheader(content, headername,
+                                                     headervalue)    
+            self.ui.debug('imap', 'savemessage: content is: ' + repr(content))
 
-            (headername, headervalue) = self.savemessage_getnewheader(content)
-            self.ui.debug('imap', 'savemessage: new headers are: %s: %s' % \
-                     (headername, headervalue))
-            content = self.savemessage_addheader(content, headername,
-                                                 headervalue)
-            self.ui.debug('imap', 'savemessage: new content is: ' + repr(content))
-            self.ui.debug('imap', 'savemessage: new content length is ' + \
-                     str(len(content)))
-
-            assert(imapobj.append(self.getfullname(),
+            # TODO: - append could raise a ValueError if the date is not in
+            #         valid format...?
+            (typ,dat) = imapobj.append(self.getfullname(),
                                        imaputil.flagsmaildir2imap(flags),
-                                       date, content)[0] == 'OK')
+                                       date, content)
+            assert(typ == 'OK')
 
             # Checkpoint.  Let it write out the messages, etc.
-            assert(imapobj.check()[0] == 'OK')
+            (typ,dat) = imapobj.check()
+            assert(typ == 'OK')
 
-            # Keep trying until we get the UID.
-            self.ui.debug('imap', 'savemessage: first attempt to get new UID')
-            uid = self.savemessage_searchforheader(imapobj, headername,
-                                                   headervalue)
-            # See docs for savemessage in Base.py for explanation of this and other return values
-            if uid <= 0:
-                self.ui.debug('imap', 'savemessage: first attempt to get new UID failed.  Going to run a NOOP and try again.')
-                assert(imapobj.noop()[0] == 'OK')
+            # get the UID.
+            if use_uidplus:
+                # get the new UID from the APPENDUID response, it could look like
+                # OK [APPENDUID 38505 3955] APPEND completed
+                # with 38505 bein folder UIDvalidity and 3955 the new UID
+                if not imapobj.untagged_responses.has_key('APPENDUID'):
+                    self.ui.warn("Server supports UIDPLUS but got no APPENDUID appending a message.")
+                    return 0
+                uid = long(imapobj.untagged_responses['APPENDUID'][-1].split(' ')[1])
+
+            else:
+                # we don't support UIDPLUS
                 uid = self.savemessage_searchforheader(imapobj, headername,
                                                        headervalue)
+                # See docs for savemessage in Base.py for explanation of this and other return values
+                if uid == 0:
+                    self.ui.debug('imap', 'savemessage: first attempt to get new UID failed.  Going to run a NOOP and try again.')
+                    assert(imapobj.noop()[0] == 'OK')
+                    uid = self.savemessage_searchforheader(imapobj, headername,
+                                                       headervalue)
+
         finally:
             self.imapserver.releaseconnection(imapobj)
 
         if uid: # avoid UID FETCH 0 crash happening later on
             self.messagelist[uid] = {'uid': uid, 'flags': flags}
 
-        self.ui.debug('imap', 'savemessage: returning %d' % uid)
+        self.ui.debug('imap', 'savemessage: returning new UID %d' % uid)
         return uid
+
 
     def savemessageflags(self, uid, flags):
         imapobj = self.imapserver.acquireconnection()
