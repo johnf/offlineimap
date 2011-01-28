@@ -18,7 +18,8 @@ Changes
 
 Bug Fixes
 ---------
-
+* Do not send localized date strings to the IMAP server as it will
+  either ignore or refuse them.
 
 Pending for the next major release
 ==================================
