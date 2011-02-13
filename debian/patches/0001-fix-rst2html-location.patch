@@ -1,0 +1,40 @@
+From: John Ferlito <johnf@inodes.org>
+Date: Mon, 14 Feb 2011 00:51:02 +1100
+Subject: [PATCH] fix-rst2html-location
+
+You need to redirect stdout to /dev/null as well otherwise rst2html
+can't be found.
+---
+ Makefile      |    2 +-
+ docs/Makefile |    4 ++--
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index 20eebab..a9d21e6 100644
+--- a/Makefile
++++ b/Makefile
+@@ -18,7 +18,7 @@
+ VERSION=4.0.16
+ TARGZ=offlineimap_$(VERSION).tar.gz
+ SHELL=/bin/bash
+-RST2HTML=`type rst2html 2>/dev/null && echo rst2html || echo rst2html.py`
++RST2HTML=`type rst2html >/dev/null 2>&1 && echo rst2html || echo rst2html.py`
+ 
+ all: build
+ 
+diff --git a/docs/Makefile b/docs/Makefile
+index fd1153e..70a99a2 100644
+--- a/docs/Makefile
++++ b/docs/Makefile
+@@ -5,8 +5,8 @@ SOURCES = $(wildcard *.rst)
+ HTML_TARGETS = $(patsubst %.rst,%.html,$(SOURCES))
+ 
+ RM = rm
+-RST2HTML=`type rst2html 2>/dev/null && echo rst2html || echo rst2html.py`
+-RST2MAN=`type rst2man 2>/dev/null && echo rst2man || echo rst2man.py`
++RST2HTML=`type rst2html >/dev/null 2>&1 && echo rst2html || echo rst2html.py`
++RST2MAN=`type rst2man >/dev/null 2>&1 && echo rst2man || echo rst2man.py`
+ 
+ all: html
+ 
+-- 
