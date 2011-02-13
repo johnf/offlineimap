@@ -1,3 +1,32 @@
+offlineimap (6.3.2~rc3-1) unstable; urgency=low
+
+  * New upstream release.
+  * New maintainer (Closes: #585035)
+  * debian/changelog
+    - Add -1, no longer a debian native package
+    - Bump standards to 3.9.1
+    - Reduced build-depends due to only what is needed
+  * debian/compat
+    - Bumpt to 7
+  * debian/control
+    - Update VCS and homepage entries
+    - remove use of I in the description
+    - Add version to debhelper
+    - Update the maintainer
+    - add python-docutils to build deps
+  * debian/doc-base
+    - Add manual
+  * debian/rules
+    - Move to debhelper 7 format
+  * debian/offlineimap.lintian-overrides
+    - Ignore man page hypen problems till docbook2man is fixed
+  * debian/watch
+    - Add a watch file
+  * debian/offlineimap.examples
+    - Added examples to install
+
+ -- John Francesco Ferlito <johnf@inodes.org>  Mon, 14 Feb 2011 00:03:44 +1100
+
 offlineimap (6.2.0.2-2) unstable; urgency=low
 
   * QA upload.

@@ -1,5 +1,3 @@
-manual.txt
-manual.pdf
-manual.html
-UPGRADING
-FAQ.html
+docs/FAQ.html
+docs/MANUAL.html
+docs/UPGRADE.html

@@ -1,14 +1,13 @@
 Source: offlineimap
 Section: mail
 Priority: optional
-Maintainer: Debian QA Group <packages@qa.debian.org>
-Build-Depends: debhelper (>> 6)
-Build-Depends-Indep: groff, docbook-utils, python-support (>= 0.4.0), gtk-doc-tools, sgml2x, jade, lynx, scons, poppler-utils, ghostscript, man-db
-Build-Conflicts-Indep: docbook-ebnf
-Standards-Version: 3.9.0
-Homepage: http://software.complete.org/offlineimap
-Vcs-Browser: http://git.complete.org/offlineimap
-Vcs-Git: git://git.complete.org/offlineimap
+Maintainer: John Francesco Ferlito <johnf@inodes.org>
+Build-Depends: debhelper (>= 7.0.50~)
+Build-Depends-Indep: python-support (>= 0.4.0), python-docutils
+Standards-Version: 3.9.1
+Homepage: https://github.com/nicolas33/offlineimap
+Vcs-Browser: https://github.com/nicolas33/offlineimap
+Vcs-Git: git://github.com/nicolas33/offlineimap.git
 
 Package: offlineimap
 Architecture: all
@@ -33,7 +32,7 @@ Description: IMAP/Maildir synchronization and reader support
     doesn't support SSL
  .
   * Synchronize your mail using a completely safe and fault-tolerant
-    algorithm.  (At least I think it is!)
+    algorithm.
  .
   * Customize which mailboxes to synchronize with regular expressions
     or lists.
