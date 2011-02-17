@@ -1,1 +1,2 @@
 0001-fix-rst2html-location.patch
+0002-Use-self.ui-rather-than-UIBase.getglobalui.patch

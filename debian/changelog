@@ -1,3 +1,10 @@
+offlineimap (6.3.2~rc3-2) unstable; urgency=low
+
+  * Add pre-upstream patch
+    - Use-self.ui-rather-than-UIBase.getglobalui.patch (Closes: 613483)
+
+ -- John Francesco Ferlito <johnf@inodes.org>  Fri, 18 Feb 2011 00:03:17 +1100
+
 offlineimap (6.3.2~rc3-1) unstable; urgency=low
 
   * New upstream release.
